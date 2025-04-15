@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  postgres-sales:
+    image: cgr.dev/chainguard/postgres:latest
+    environment:
+      POSTGRES_DB: sales_points_db
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5433:5432"
+    networks:
+      - backend
+
+  postgres-accreditations:
+    image: cgr.dev/chainguard/postgres:latest
+    environment:
+      POSTGRES_DB: accreditations_db
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5434:5432"
+    networks:
+      - backend
+
+  sales-point-service:
+    build:
+      context: ./sales-point-service
+    depends_on:
+      - postgres-sales
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-sales:5432/sales_points_db
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "8080:8080"
+    networks:
+      - backend
+
+  accreditations-service:
+    build:
+      context: ./accreditations-service
+    depends_on:
+      - postgres-accreditations
+      - sales-point-service
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-accreditations:5432/accreditations_db
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "8081:8081"
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge

@@ -1,0 +1,6 @@
+[submodule "sales-point-service"]
+	path = sales-point-service
+	url = https://github.com/pablooromero/sales-point-service.git
+[submodule "accreditations-service"]
+	path = accreditations-service
+	url = https://github.com/pablooromero/accreditations-service.git
