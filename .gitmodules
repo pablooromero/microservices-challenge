@@ -4,3 +4,9 @@
 [submodule "accreditations-service"]
 	path = accreditations-service
 	url = https://github.com/pablooromero/accreditations-service.git
+[submodule "api-gateway"]
+	path = api-gateway
+	url = https://github.com/pablooromero/api-gateway
+[submodule "eureka-service"]
+	path = eureka-service
+	url = https://github.com/pablooromero/eureka-service
