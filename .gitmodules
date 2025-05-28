@@ -10,3 +10,9 @@
 [submodule "eureka-service"]
 	path = eureka-service
 	url = https://github.com/pablooromero/eureka-service
+[submodule "user-service"]
+	path = user-service
+	url = https://github.com/pablooromero/user-service
+[submodule "email-service"]
+	path = email-service
+	url = https://github.com/pablooromero/email-service

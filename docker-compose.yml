@@ -1,81 +1,300 @@
 version: '3.8'
 
 services:
+  # --- Bases de Datos ---
+  postgres-users:
+    image: postgres:15-alpine
+    container_name: postgres-users
+    environment:
+      POSTGRES_DB: user_db
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_users_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    restart: unless-stopped
+
   postgres-sales:
-    image: cgr.dev/chainguard/postgres:latest
+    image: postgres:15-alpine
+    container_name: postgres-sales
     environment:
       POSTGRES_DB: sales_points_db
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5433:5432"
+    volumes:
+      - postgres_sales_data:/var/lib/postgresql/data
     networks:
       - backend
+    restart: unless-stopped
 
   postgres-accreditations:
-    image: cgr.dev/chainguard/postgres:latest
+    image: postgres:15-alpine
+    container_name: postgres-accreditations
     environment:
       POSTGRES_DB: accreditations_db
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5434:5432"
+    volumes:
+      - postgres_accreditations_data:/var/lib/postgresql/data
     networks:
       - backend
+    restart: unless-stopped
 
+  # --- RabbitMQ ---
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq/
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: rabbitmq-diagnostics check_port_connectivity
+      interval: 30s
+      timeout: 30s
+      retries: 3
+
+  # --- Eureka Server ---
   eureka-service:
     build:
       context: ./eureka-service
-    restart: unless-stopped
+      dockerfile: Dockerfile
+    container_name: eureka-service
     ports:
       - "8761:8761"
     networks:
       - backend
-
-  api-gateway:
-    build:
-      context: ./api-gateway
-    depends_on:
-      - eureka-service
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # --- Zipkin ---
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin
     ports:
-      - "8080:8080"
+      - "9411:9411"
     networks:
       - backend
+    restart: unless-stopped
+
+  # --- SonarQube ---
+  # sonarqube:
+  #   image: sonarqube:10.5.1-community
+  #   container_name: sonarqube
+  #   ports:
+  #     - "9000:9000"
+  #     # - "9092:9092"
+  #   environment:
+  #     - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+  #     # - sonar.jdbc.url=jdbc:postgresql://postgres-sonar:5432/sonar
+  #     # - sonar.jdbc.username=sonar
+  #     # - sonar.jdbc.password=sonar
+  #   volumes:
+  #     - sonarqube_conf:/opt/sonarqube/conf
+  #     - sonarqube_data:/opt/sonarqube/data
+  #     - sonarqube_extensions:/opt/sonarqube/extensions
+  #     - sonarqube_logs:/opt/sonarqube/logs
+  #   networks:
+  #     - backend
+  #   restart: unless-stopped
+  #   # depends_on:
+  #   #   - postgres-sonar
+
+  # --- Microservicios ---
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres-users:
+        condition: service_started
+      eureka-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-service:8761/eureka/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-users:5432/user_db
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD}
+      SPRING_ZIPKIN_BASE_URL: http://zipkin:9411/
+      CLIENT_ID: ${CLIENT_ID}
+      CLIENT_SECRET: ${CLIENT_SECRET}
+      # SONAR_HOST_URL: http://sonarqube:9000
+    networks:
+      - backend
+    restart: unless-stopped
+
+  email-service:
+    build:
+      context: ./email-service
+      dockerfile: Dockerfile
+    container_name: email-service
+    ports:
+      - "8086:8086"
+    depends_on:
+      eureka-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-service:8761/eureka/
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      SPRING_ZIPKIN_BASE_URL: http://zipkin:9411/
+      SPRING_MAIL_HOST: smtp.gmail.com
+      SPRING_MAIL_PORT: 587
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: true
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: true
+    networks:
+      - backend
+    restart: unless-stopped
 
   sales-point-service:
     build:
       context: ./sales-point-service
+      dockerfile: Dockerfile
+    container_name: sales-point-service
+    ports:
+      - "8082:8082"
     depends_on:
-      - postgres-sales
-      - eureka-service
-    restart: unless-stopped
+      postgres-sales:
+        condition: service_started
+      eureka-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
     environment:
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-service:8761/eureka/
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-sales:5432/sales_points_db
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "8082:8082"
+      JWT_SECRET: ${JWT_SECRET}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      SPRING_ZIPKIN_BASE_URL: http://zipkin:9411/
     networks:
       - backend
+    restart: unless-stopped
 
   accreditations-service:
     build:
       context: ./accreditations-service
+      dockerfile: Dockerfile
+    container_name: accreditations-service
+    ports:
+      - "8081:8081"
     depends_on:
-      - postgres-accreditations
-      - sales-point-service
-      - eureka-service
-    restart: unless-stopped
+      postgres-accreditations:
+        condition: service_started
+      sales-point-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      eureka-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
     environment:
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-service:8761/eureka/
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-accreditations:5432/accreditations_db
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "8081:8081"
+      JWT_SECRET: ${JWT_SECRET}
+      USER_SERVICE_URL: http://user-service:8083/api/users/
+      SALES_POINT_SERVICE_URL: http://sales-point-service:8082/api/sales-points/
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD}
+      SPRING_ZIPKIN_BASE_URL: http://zipkin:9411/
     networks:
       - backend
+    restart: unless-stopped
 
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      eureka-service:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      accreditations-service:
+        condition: service_started
+      sales-point-service:
+        condition: service_started
+      email-service:
+        condition: service_started
+      zipkin:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-service:8761/eureka/
+      JWT_SECRET: ${JWT_SECRET}
+      SPRING_ZIPKIN_BASE_URL: http://zipkin:9411/
+
+    networks:
+      - backend
+    restart: unless-stopped
+
+# --- Volúmenes Persistentes ---
+volumes:
+  postgres_users_data:
+  postgres_sales_data:
+  postgres_accreditations_data:
+  rabbitmq_data:
+  # sonarqube_conf:
+  # sonarqube_data:
+  # sonarqube_extensions:
+  # sonarqube_logs:
+
+# --- Network ---
 networks:
   backend:
     driver: bridge
