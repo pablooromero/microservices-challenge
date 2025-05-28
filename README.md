@@ -226,3 +226,11 @@ Accessible via Swagger UI through the API Gateway:
 * Gmail app password used if 2FA enabled
 * Docker containers can communicate with each other
 * `.env` is used for secret management
+
+## 14. Default Admin User
+
+Email: test@example.com
+
+Password: Test12345
+
+Use these credentials to log in and obtain an admin JWT token for testing protected endpoints.
